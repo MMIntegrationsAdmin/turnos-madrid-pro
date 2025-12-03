@@ -20,8 +20,9 @@ import {
   SelectValue,
 } from '@/components/ui/select';
 import { Textarea } from '@/components/ui/textarea';
+import { Checkbox } from '@/components/ui/checkbox';
 import { Staff, Shift, ShiftStatus, SHIFT_STATUS_LABELS } from '@/lib/types';
-import { Trash2 } from 'lucide-react';
+import { Trash2, Users } from 'lucide-react';
 
 interface ShiftDialogProps {
   open: boolean;
@@ -49,6 +50,7 @@ export function ShiftDialog({
   onDeleteShift,
 }: ShiftDialogProps) {
   const [loading, setLoading] = useState(false);
+  const [selectedStaffIds, setSelectedStaffIds] = useState<string[]>([]);
   const [formData, setFormData] = useState({
     staff_id: '',
     date: '',
@@ -70,6 +72,7 @@ export function ShiftDialog({
         status: shift.status,
         absence_reason: shift.absence_reason || '',
       });
+      setSelectedStaffIds([]);
     } else if (initialStaffId && initialDate) {
       setFormData({
         staff_id: initialStaffId,
@@ -79,8 +82,36 @@ export function ShiftDialog({
         status: 'planned',
         absence_reason: '',
       });
+      setSelectedStaffIds([initialStaffId]);
+    } else if (initialDate) {
+      setFormData({
+        staff_id: '',
+        date: format(initialDate, 'yyyy-MM-dd'),
+        start_time: '09:00',
+        end_time: '17:00',
+        status: 'planned',
+        absence_reason: '',
+      });
+      setSelectedStaffIds([]);
     }
   }, [shift, initialStaffId, initialDate, open]);
+
+  const toggleStaffSelection = (staffId: string) => {
+    setSelectedStaffIds((prev) =>
+      prev.includes(staffId)
+        ? prev.filter((id) => id !== staffId)
+        : [...prev, staffId]
+    );
+  };
+
+  const selectAllStaff = () => {
+    const activeStaff = staff.filter((s) => s.is_active);
+    if (selectedStaffIds.length === activeStaff.length) {
+      setSelectedStaffIds([]);
+    } else {
+      setSelectedStaffIds(activeStaff.map((s) => s.id));
+    }
+  };
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -97,15 +128,19 @@ export function ShiftDialog({
           absence_reason: formData.absence_reason || null,
         });
       } else {
-        await onCreateShift({
-          business_id: businessId,
-          staff_id: formData.staff_id,
-          date: formData.date,
-          start_time: formData.start_time,
-          end_time: formData.end_time,
-          status: formData.status,
-          absence_reason: formData.absence_reason || null,
-        });
+        // Create shifts for all selected staff members
+        const promises = selectedStaffIds.map((staffId) =>
+          onCreateShift({
+            business_id: businessId,
+            staff_id: staffId,
+            date: formData.date,
+            start_time: formData.start_time,
+            end_time: formData.end_time,
+            status: formData.status,
+            absence_reason: formData.absence_reason || null,
+          })
+        );
+        await Promise.all(promises);
       }
       onClose();
     } finally {
@@ -123,11 +158,12 @@ export function ShiftDialog({
     }
   };
 
-  const selectedStaff = staff.find((s) => s.id === formData.staff_id);
+  const activeStaff = staff.filter((s) => s.is_active);
+  const allSelected = activeStaff.length > 0 && selectedStaffIds.length === activeStaff.length;
 
   return (
     <Dialog open={open} onOpenChange={onClose}>
-      <DialogContent className="sm:max-w-md">
+      <DialogContent className="sm:max-w-md max-h-[90vh] overflow-y-auto">
         <DialogHeader>
           <DialogTitle>
             {isEditing ? 'Editar turno' : 'Nuevo turno'}
@@ -136,7 +172,12 @@ export function ShiftDialog({
             {initialDate && !isEditing && (
               <>
                 {format(initialDate, "EEEE d 'de' MMMM", { locale: es })}
-                {selectedStaff && ` - ${selectedStaff.full_name}`}
+                {selectedStaffIds.length === 1 && (
+                  <> - {staff.find((s) => s.id === selectedStaffIds[0])?.full_name}</>
+                )}
+                {selectedStaffIds.length > 1 && (
+                  <> - {selectedStaffIds.length} empleados seleccionados</>
+                )}
               </>
             )}
             {isEditing && shift?.staff && (
@@ -150,26 +191,74 @@ export function ShiftDialog({
         </DialogHeader>
 
         <form onSubmit={handleSubmit} className="space-y-4">
-          <div className="space-y-2">
-            <Label htmlFor="staff">Empleado</Label>
-            <Select
-              value={formData.staff_id}
-              onValueChange={(value) =>
-                setFormData({ ...formData, staff_id: value })
-              }
-            >
-              <SelectTrigger>
-                <SelectValue placeholder="Selecciona empleado" />
-              </SelectTrigger>
-              <SelectContent>
-                {staff.map((member) => (
-                  <SelectItem key={member.id} value={member.id}>
-                    {member.full_name} - {member.role}
-                  </SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
-          </div>
+          {isEditing ? (
+            <div className="space-y-2">
+              <Label htmlFor="staff">Empleado</Label>
+              <Select
+                value={formData.staff_id}
+                onValueChange={(value) =>
+                  setFormData({ ...formData, staff_id: value })
+                }
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Selecciona empleado" />
+                </SelectTrigger>
+                <SelectContent>
+                  {staff.map((member) => (
+                    <SelectItem key={member.id} value={member.id}>
+                      {member.full_name} - {member.role}
+                    </SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <div className="flex items-center justify-between">
+                <Label className="flex items-center gap-2">
+                  <Users className="w-4 h-4" />
+                  Empleados
+                </Label>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={selectAllStaff}
+                  className="h-auto py-1 px-2 text-xs"
+                >
+                  {allSelected ? 'Deseleccionar todos' : 'Seleccionar todos'}
+                </Button>
+              </div>
+              <div className="border rounded-lg p-3 max-h-40 overflow-y-auto space-y-2 bg-muted/30">
+                {activeStaff.length === 0 ? (
+                  <p className="text-sm text-muted-foreground text-center py-2">
+                    No hay empleados activos
+                  </p>
+                ) : (
+                  activeStaff.map((member) => (
+                    <label
+                      key={member.id}
+                      className="flex items-center gap-3 p-2 rounded-md hover:bg-muted/50 cursor-pointer transition-colors"
+                    >
+                      <Checkbox
+                        checked={selectedStaffIds.includes(member.id)}
+                        onCheckedChange={() => toggleStaffSelection(member.id)}
+                      />
+                      <div className="flex-1 min-w-0">
+                        <p className="text-sm font-medium truncate">{member.full_name}</p>
+                        <p className="text-xs text-muted-foreground">{member.role}</p>
+                      </div>
+                    </label>
+                  ))
+                )}
+              </div>
+              {selectedStaffIds.length > 0 && (
+                <p className="text-xs text-muted-foreground">
+                  {selectedStaffIds.length} empleado{selectedStaffIds.length > 1 ? 's' : ''} seleccionado{selectedStaffIds.length > 1 ? 's' : ''}
+                </p>
+              )}
+            </div>
+          )}
 
           <div className="space-y-2">
             <Label htmlFor="date">Fecha</Label>
@@ -264,8 +353,18 @@ export function ShiftDialog({
             <Button type="button" variant="outline" onClick={onClose}>
               Cancelar
             </Button>
-            <Button type="submit" disabled={loading || !formData.staff_id}>
-              {loading ? 'Guardando...' : isEditing ? 'Guardar cambios' : 'Crear turno'}
+            <Button 
+              type="submit" 
+              disabled={loading || (isEditing ? !formData.staff_id : selectedStaffIds.length === 0)}
+            >
+              {loading 
+                ? 'Guardando...' 
+                : isEditing 
+                  ? 'Guardar cambios' 
+                  : selectedStaffIds.length > 1 
+                    ? `Crear ${selectedStaffIds.length} turnos` 
+                    : 'Crear turno'
+              }
             </Button>
           </DialogFooter>
         </form>
